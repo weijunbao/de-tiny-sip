@@ -9,6 +9,8 @@
 
 package de.tinysip.sip;
 
+
+
 import java.text.ParseException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,6 +31,8 @@ import javax.sip.header.ToHeader;
 public class SipContact {
 	private String sipUserName;
 	private String sipDomain;
+	private int sipPort = 5060;
+	private boolean isLocalContact = false;
 	private boolean isSipURI = true;
 
 	/**
@@ -40,6 +44,20 @@ public class SipContact {
 	public SipContact(String sipUserName, String sipDomain) {
 		this.sipUserName = sipUserName;
 		this.sipDomain = sipDomain;
+	}
+
+	/**
+	 * Create a SipContact that is a local contact by specifying the user name, contact's IP address and sip port.
+	 * 
+	 * @param sipUserName the SIP username of the contact
+	 * @param ipAddress the IP address of the contact
+	 * @param sipPort the SIP port of the contact
+	 */
+	public SipContact(String sipUserName, String ipAddress, int sipPort) {
+		this.sipUserName = sipUserName;
+		this.sipDomain = ipAddress;
+		this.sipPort = sipPort;
+		isLocalContact = true;
 	}
 
 	/**
@@ -114,6 +132,20 @@ public class SipContact {
 		}
 
 		return null;
+	}
+	
+	/**
+	 * @return the SIP port for a local user
+	 */
+	public int getSipPort() {
+		return sipPort;
+	}
+	
+	/**
+	 * @return if this contact is a local contact
+	 */
+	public boolean isLocalContact(){
+		return isLocalContact;
 	}
 
 	@Override

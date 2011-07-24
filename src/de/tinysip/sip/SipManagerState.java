@@ -56,5 +56,21 @@ public enum SipManagerState {
 	/**
 	 * This state is used when an error occurred.
 	 */
-	ERROR
+	ERROR,
+	/**
+	 * This state is used when a contact is busy.
+	 */
+	BUSY,
+	/**
+	 * This state is used when the remote contact declined the call.
+	 */
+	DECLINED,
+	/**
+	 * This state is used when a remote contact is invalid.
+	 */
+	INVALID,
+	/**
+	 * This state is used when a remote contact ended the call.
+	 */
+	BYE
 }

@@ -9,8 +9,13 @@
 
 package de.tinysip.sip;
 
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.TooManyListenersException;
 
@@ -31,10 +36,6 @@ import javax.sip.header.ProxyAuthenticateHeader;
 import javax.sip.header.WWWAuthenticateHeader;
 import javax.sip.message.Request;
 import javax.sip.message.Response;
-
-import android.util.Log;
-
-import de.javawi.jstun.test.DiscoveryInfo;
 
 /**
  * SipManager handles the session establishment, teardown and authorization. Notifies state changes by raising SipManagerStatusChangedEvent, SipManagerCallStatusEvent,
@@ -65,9 +66,9 @@ public class SipManager implements SipListener {
 	 * @param discoveryInfo
 	 *            the STUN DiscoveryInfo for NAT traversal
 	 */
-	private SipManager(LocalSipProfile localSipProfile, DiscoveryInfo discoveryInfo) {
+	private SipManager(LocalSipProfile localSipProfile, String localIPAddress, int localSipPort) {
 		try {
-			sipMessageHandler = SipMessageHandler.createInstance(localSipProfile, discoveryInfo);
+			sipMessageHandler = SipMessageHandler.createInstance(localSipProfile, localIPAddress, localSipPort);
 			sipMessageHandler.getSipProvider().addSipListener(this);
 			statusListeners = new ArrayList<SipManagerStatusListener>();
 			currentState = SipManagerState.IDLE;
@@ -84,9 +85,9 @@ public class SipManager implements SipListener {
 	 *            the STUN DiscoveryInfo for NAT traversal
 	 * @return the created instance of SipManager
 	 */
-	public static SipManager createInstance(LocalSipProfile localSipProfile, DiscoveryInfo discoveryInfo) {
+	public static SipManager createInstance(LocalSipProfile localSipProfile, String localIPAddress, int localSipPort) {
 		if (sipManager == null)
-			sipManager = new SipManager(localSipProfile, discoveryInfo);
+			sipManager = new SipManager(localSipProfile, localIPAddress, localSipPort);
 
 		return sipManager;
 	}
@@ -109,8 +110,12 @@ public class SipManager implements SipListener {
 	 * @throws SipException
 	 */
 	public void registerProfile() throws InvalidArgumentException, TooManyListenersException, ParseException, SipException {
-		setStatusChanged(SipManagerState.REGISTERING);
-		sipMessageHandler.register(SipRequestState.REGISTER);
+		if (sipMessageHandler.getLocalSipProfile().isLocalProfile())
+			setStatusChanged(SipManagerState.READY);
+		else {
+			setStatusChanged(SipManagerState.REGISTERING);
+			sipMessageHandler.register(SipRequestState.REGISTER);
+		}
 	}
 
 	/**
@@ -121,8 +126,12 @@ public class SipManager implements SipListener {
 	 * @throws SipException
 	 */
 	public void unregisterProfile() throws ParseException, InvalidArgumentException, SipException {
-		setStatusChanged(SipManagerState.UNREGISTERING);
-		sipMessageHandler.register(SipRequestState.UNREGISTER);
+		if (sipMessageHandler.getLocalSipProfile().isLocalProfile())
+			setStatusChanged(SipManagerState.IDLE);
+		else {
+			setStatusChanged(SipManagerState.UNREGISTERING);
+			sipMessageHandler.register(SipRequestState.UNREGISTER);
+		}
 	}
 
 	/**
@@ -155,20 +164,25 @@ public class SipManager implements SipListener {
 	public void processRequest(RequestEvent requestEvent) {
 		Request request = requestEvent.getRequest();
 		String method = ((CSeqHeader) request.getHeader(CSeqHeader.NAME)).getMethod();
-		Log.d(TAG, "Incoming " + method + " request");
+		System.out.println(TAG +": Incoming " + method + " request");
 
 		if (method.equals(Request.INVITE)) {
 			try {
 				if (currentSession == null) {
 					SessionDescription sdpSession = SdpFactory.getInstance().createSessionDescription(new String(request.getRawContent()));
 					currentSession = SipMessageHandler.createSipSession(request, sdpSession);
+					currentSession.setIncoming(true);
+					
+					if(currentSession.getToSipURI().equals(sipMessageHandler.getLocalSipProfile().getSipUri())){
+						setStatusChanged(SipManagerState.INCOMING, currentSession.getCallerNumber());
+						setCallStatus("Incoming call from " + currentSession.getCallerNumber());
+						System.out.println(TAG +": " + currentSession.toString());
 
-					setStatusChanged(SipManagerState.INCOMING);
-					setCallStatus("Incoming call from " + currentSession.getCallerNumber());
-					Log.d(TAG, currentSession.toString());
-
-					currentRequest = request;
-					sipMessageHandler.sendRinging(request);
+						currentRequest = request;
+						sipMessageHandler.sendRinging(request);						
+					} else {
+						sipMessageHandler.sendNotFound(request);
+					}
 				} else {
 					sipMessageHandler.sendBusyHere(request);
 				}
@@ -180,7 +194,8 @@ public class SipManager implements SipListener {
 		} else if (method.equals(Request.ACK)) {
 			if (currentSession != null) {
 				sipMessageHandler.setDialog(requestEvent.getDialog());
-				setStatusChanged(SipManagerState.ESTABLISHED);
+				
+				setStatusChanged(SipManagerState.ESTABLISHED, currentSession.getCallerNumber());
 				setSessionChanged(currentSession);
 			}
 		} else if (method.equals(Request.BYE)) {
@@ -190,6 +205,7 @@ public class SipManager implements SipListener {
 				setStatusChanged(SipManagerState.ERROR);
 			}
 			// no need to send 200 OK, SipStack should do that automatically
+			setStatusChanged(SipManagerState.BYE);
 			reset();
 		}
 	}
@@ -198,7 +214,7 @@ public class SipManager implements SipListener {
 	public void processResponse(ResponseEvent responseEvent) {
 		Response response = (Response) responseEvent.getResponse();
 		int status = response.getStatusCode();
-		Log.d(TAG, "Response Status Code: " + status);
+		System.out.println(TAG +": Response Status Code: " + status);
 
 		switch (status) {
 		case 180: // Ringing
@@ -215,7 +231,9 @@ public class SipManager implements SipListener {
 						&& responseEvent.getDialog() != null) {
 					SessionDescription sdpSession = SdpFactory.getInstance().createSessionDescription(new String(response.getRawContent()));
 					currentSession = SipMessageHandler.createSipSession(response, sdpSession);
-
+					currentSession.setIncoming(false);
+					
+					sipMessageHandler.setDialog(responseEvent.getDialog());
 					sipMessageHandler.sendAck();
 
 					setStatusChanged(SipManagerState.ESTABLISHED);
@@ -252,11 +270,13 @@ public class SipManager implements SipListener {
 			break;
 
 		case 404: // Not found
+			setStatusChanged(SipManagerState.INVALID);
 			break;
 
 		case 407: // Proxy Authentication required
 			try {
 				registerTryCount++;
+				System.out.println(TAG +": " + response.toString());
 
 				if (currentSession == null && currentContact != null) {
 					ProxyAuthenticateHeader authHeader = (ProxyAuthenticateHeader) response.getHeader(ProxyAuthenticateHeader.NAME);
@@ -273,21 +293,16 @@ public class SipManager implements SipListener {
 			break;
 
 		case 486: // Busy
-			reset();
-
+			setStatusChanged(SipManagerState.BUSY);
 			break;
 
 		case 603: // Decline
-			reset();
-
+			setStatusChanged(SipManagerState.DECLINED);
 			break;
 
 		case 500: // Too many clients
-			try {
-				setStatusChanged(SipManagerState.ERROR);
-			} catch (Exception e) {
-				setStatusChanged(SipManagerState.ERROR);
-			}
+			setStatusChanged(SipManagerState.ERROR);
+			break;
 
 		default:
 			break;
@@ -314,8 +329,6 @@ public class SipManager implements SipListener {
 	public void acceptCall() throws SipException, InvalidArgumentException, ParseException, SdpException {
 		if (currentRequest != null)
 			sipMessageHandler.sendOK(currentRequest, null);
-
-		setStatusChanged(SipManagerState.ESTABLISHED);
 	}
 
 	/**
@@ -334,6 +347,13 @@ public class SipManager implements SipListener {
 	}
 
 	/**
+	 * Confirm the BUSY, DECLINED and INVALID state and reset the SipManager.
+	 */
+	public void confirmStateAndReset() {
+		reset();
+	}
+
+	/**
 	 * End the current call and reset the SipManager.
 	 * 
 	 * @throws SipException
@@ -348,6 +368,13 @@ public class SipManager implements SipListener {
 			sipMessageHandler.sendCancel();
 
 		reset();
+	}
+	
+	/** 
+	 * @return the LocalSipProfile
+	 */
+	public LocalSipProfile getLocalSipProfile(){
+		return sipMessageHandler.getLocalSipProfile();
 	}
 
 	/**
@@ -388,7 +415,7 @@ public class SipManager implements SipListener {
 			}
 		}
 	}
-
+	
 	/**
 	 * Raises a SipManagerCallStatusEvent.
 	 * 
@@ -410,12 +437,14 @@ public class SipManager implements SipListener {
 	 * 
 	 * @param state
 	 *            the new state to signal
+	 * @param info
+	 *            additional information about the state
 	 */
-	private void setStatusChanged(SipManagerState state) {
+	private void setStatusChanged(SipManagerState state, String info) {
 		if (!currentState.equals(state)) {
-			Log.d(TAG, "New State: " + state.toString());
+			System.out.println(TAG +": New State: " + state.toString() + " " + info);
 			currentState = state;
-			SipManagerStatusChangedEvent event = new SipManagerStatusChangedEvent(this, state);
+			SipManagerStatusChangedEvent event = new SipManagerStatusChangedEvent(this, state, info);
 
 			synchronized (statusListeners) {
 				for (SipManagerStatusListener item : statusListeners) {
@@ -423,6 +452,48 @@ public class SipManager implements SipListener {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Set the new state of the SipManager. Raises a SipManagerStatusChangedEvent.
+	 * 
+	 * @param state
+	 *            the new state to signal
+	 */
+	private void setStatusChanged(SipManagerState state) {
+		setStatusChanged(state, "");
+	}
+
+	/**
+	 * Returns the first Internet-facing InetAddress, or Localhost, if none was found
+	 * 
+	 * @return InetAddress the InetAddress of the interface
+	 * @throws SocketException
+	 * @throws UnknownHostException
+	 */
+	public static InetAddress getInetAddress(){
+		try{
+		Enumeration<NetworkInterface> ifaces = NetworkInterface.getNetworkInterfaces();
+		while (ifaces.hasMoreElements()) {
+			NetworkInterface iface = ifaces.nextElement();
+			Enumeration<InetAddress> iaddresses = iface.getInetAddresses();
+			while (iaddresses.hasMoreElements()) {
+				InetAddress iaddress = iaddresses.nextElement();
+				if (InetAddress.class.isInstance(iaddress)) {
+					if ((!iaddress.isLoopbackAddress()) && (!iaddress.isLinkLocalAddress())) {
+						return iaddress;
+					}
+				}
+			}
+		}
+		}catch (Exception e) {
+		}
+
+		try {
+			return InetAddress.getLocalHost();
+		} catch (UnknownHostException e) {
+		}
+		return null;
 	}
 
 	/**

@@ -31,10 +31,14 @@ public class SipSession {
 	private int remoteSipPort;
 
 	private URI toSipURI;
+	private boolean incoming;
 
 	private List<SipAudioFormat> audioFormats;
-	private int remoteRtpPort;
-	private int remoteRtcpPort;
+	private List<SipVideoFormat> videoFormats;
+	private int remoteAudioRtpPort;
+	private int remoteAudioRtcpPort;
+	private int remoteVideoRtpPort;
+	private int remoteVideoRtcpPort;
 
 	/**
 	 * Create a new SipSession by specifying the caller and the called sip uri
@@ -73,14 +77,33 @@ public class SipSession {
 	 * @param toSipURI the SIP URI of the called
 	 * @param remoteAddress the InetAddress od the remote participant
 	 * @param remoteSipPort the SIP port of the remote participant
-	 * @param remoteRtpPort the RTP port of the remote participant
-	 * @param remoteRtcpPort the RTCP port of the remote participant
+	 * @param remoteAudioRtpPort the audio RTP port of the remote participant
+	 * @param remoteAudioRtcpPort the audio RTCP port of the remote participant
 	 */
-	public SipSession(URI fromSipURI, URI toSipURI, InetAddress remoteAddress, int remoteSipPort, int remoteRtpPort, int remoteRtcpPort) {
+	public SipSession(URI fromSipURI, URI toSipURI, InetAddress remoteAddress, int remoteSipPort, int remoteAudioRtpPort, int remoteAudioRtcpPort) {
 		this(fromSipURI, toSipURI, remoteAddress, remoteSipPort);
-		this.remoteRtpPort = remoteRtpPort;
-		this.remoteRtcpPort = remoteRtcpPort;
+		this.remoteAudioRtpPort = remoteAudioRtpPort;
+		this.remoteAudioRtcpPort = remoteAudioRtcpPort;
 	}
+
+	/**
+	 * Create a new SipSession by specifying the caller and the called sip uri,
+	 * remote Internet address, sip port, audio rtp and rtcp ports, video rtp and rtcp ports.
+	 * 
+	 * @param fromSipURI the SIP URI of the caller
+	 * @param toSipURI the SIP URI of the called
+	 * @param remoteAddress the InetAddress od the remote participant
+	 * @param remoteSipPort the SIP port of the remote participant
+	 * @param remoteAudioRtpPort the audio RTP port of the remote participant
+	 * @param remoteAudioRtcpPort the audio RTCP port of the remote participant
+	 * @param remoteVideoRtpPort the video RTP port of the remote participant
+	 * @param remoteVideoRtcpPort the video RTCP port of the remote participant
+	 */
+	public SipSession(URI fromSipURI, URI toSipURI, InetAddress remoteAddress, int remoteSipPort, int remoteAudioRtpPort, int remoteAudioRtcpPort, int remoteVideoRtpPort, int remoteVideoRtcpPort) {
+		this(fromSipURI, toSipURI, remoteAddress, remoteSipPort, remoteAudioRtpPort, remoteAudioRtcpPort);
+		this.remoteVideoRtpPort = remoteVideoRtpPort;
+		this.remoteVideoRtcpPort = remoteVideoRtcpPort;
+	}	
 
 	/**
 	 * Create a javax.sip.header.ToHeader for this SipSession.
@@ -112,6 +135,22 @@ public class SipSession {
 	}
 
 	/**
+	 * Set the supported video formats for the SipSession.
+	 * @param formats a List of SipVideoFormat specifying the supported video formats of the remote participant
+	 */
+	public void setVideoFormats(List<SipVideoFormat> videoFormats) {
+		this.videoFormats = videoFormats;
+	}
+
+	/**
+	 * Get the supported video formats for the SipSessions.
+	 * @return formats a List of SipVideoFormat specifying the supported video formats of the remote participant
+	 */
+	public List<SipVideoFormat> getVideoFormats() {
+		return videoFormats;
+	}
+
+	/**
 	 * @return the caller number as a formatted string
 	 */
 	public String getCallerNumber() {
@@ -120,6 +159,7 @@ public class SipSession {
 		result = result.replace("sip:+49", "0");
 		result = result.replace("sip:49", "0");
 		result = result.replace("sip:", "");
+		//TODO: add regex for general numbers
 		return result;
 	}
 
@@ -145,17 +185,30 @@ public class SipSession {
 	}
 
 	/**
-	 * @return the remote rtp port
+	 * @return the remote rtp port for audio
 	 */
-	public int getRemoteRtpPort() {
-		return remoteRtpPort;
+	public int getRemoteAudioRtpPort() {
+		return remoteAudioRtpPort;
 	}
 
 	/**
-	 * @return the remote rtcp port
+	 * @return the remote rtcp port for audio
 	 */
-	public int getRemoteRtcpPort() {
-		return remoteRtcpPort;
+	public int getRemoteAudioRtcpPort() {
+		return remoteAudioRtcpPort;
+	}
+	/**
+	 * @return the remote rtp port for video
+	 */
+	public int getRemoteVideoRtpPort() {
+		return remoteVideoRtpPort;
+	}
+
+	/**
+	 * @return the remote rtcp port for video
+	 */
+	public int getRemoteVideoRtcpPort() {
+		return remoteVideoRtcpPort;
 	}
 
 	/**
@@ -163,6 +216,21 @@ public class SipSession {
 	 */
 	public URI getToSipURI() {
 		return toSipURI;
+	}
+	
+	/**
+	 * Whether the session is incoming or not
+	 * @param incoming
+	 */
+	public void setIncoming(boolean incoming) {
+		this.incoming = incoming;
+	}
+	
+	/**
+	 * @return true if the session is incoming, false otherwise
+	 */
+	public boolean isIncoming() {
+		return incoming;
 	}
 
 	@Override
@@ -172,7 +240,7 @@ public class SipSession {
 
 	@Override
 	public String toString() {
-		return remoteAddress.getHostAddress() + ":" + remoteSipPort + " rtp: " + remoteRtpPort + " rtcp: " + remoteRtcpPort;
+		return remoteAddress.getHostAddress() + ":" + remoteSipPort + " audio rtp: " + remoteAudioRtpPort + " audio rtcp: " + remoteAudioRtcpPort+ " video rtp: " + remoteVideoRtpPort + " video rtcp: " + remoteVideoRtcpPort;
 	}
 
 }

@@ -9,4 +9,5 @@
     <string name="SIPReady">SIP profile registered successfully</string>
     <string name="SIPInvite">Sending SIP Invite to </string>
     <string name="STUNDiscovery">Starting STUN Discovery</string>
+    <string name="STUNNotSupported">NAT does not allow SIP connections</string>
 </resources>
