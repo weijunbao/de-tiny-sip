@@ -62,10 +62,6 @@ import javax.sip.message.MessageFactory;
 import javax.sip.message.Request;
 import javax.sip.message.Response;
 
-import android.util.Log;
-
-import de.javawi.jstun.test.DiscoveryInfo;
-
 /**
  * SipMessageHandler takes care of sending sip messages and parsing incoming ones.
  * 
@@ -82,7 +78,8 @@ public class SipMessageHandler {
 	private ListeningPoint listeningPoint = null;
 
 	private LocalSipProfile localSipProfile = null;
-	private DiscoveryInfo discoveryInfo = null;
+	private String localIPAddress;
+	private int localSipPort;
 
 	private ServerTransaction serverTransaction = null;
 	private ClientTransaction clientTransaction = null;
@@ -105,16 +102,17 @@ public class SipMessageHandler {
 	 * @throws InvalidArgumentException
 	 * @throws ObjectInUseException
 	 */
-	private SipMessageHandler(LocalSipProfile localSipProfile, DiscoveryInfo discoveryInfo) throws PeerUnavailableException, TransportNotSupportedException,
+	private SipMessageHandler(LocalSipProfile localSipProfile, String localIPAddress, int localSipPort) throws PeerUnavailableException, TransportNotSupportedException,
 			InvalidArgumentException, ObjectInUseException {
 		this.localSipProfile = localSipProfile;
-		this.discoveryInfo = discoveryInfo;
+		this.localIPAddress = localIPAddress;
+		this.localSipPort = localSipPort;
 		// Create SipFactory
 		SipFactory sipFactory = SipFactory.getInstance();
 
 		// Create unique name properties for SipStack
 		Properties properties = new Properties();
-		properties.setProperty("javax.sip.STACK_NAME", "ubivoip");
+		properties.setProperty("javax.sip.STACK_NAME", "tinysip");
 
 		// Create SipStack object
 		sipStack = sipFactory.createSipStack(properties);
@@ -123,17 +121,18 @@ public class SipMessageHandler {
 		messageFactory = sipFactory.createMessageFactory();
 
 		int minPort = 5000, maxPort = 6000;
-		int localPort = discoveryInfo.getLocalPort();
 		boolean successfullyBound = false;
 		while (!successfullyBound) {
 			try {
-				listeningPoint = sipStack.createListeningPoint(discoveryInfo.getLocalIP().getHostAddress(), localPort, ListeningPoint.UDP);
+				listeningPoint = sipStack.createListeningPoint(localIPAddress, localSipPort, ListeningPoint.UDP);
 			} catch (InvalidArgumentException ex) {
 				// choose another port between MIN and MAX
-				localPort = (int) ((maxPort - minPort) * Math.random()) + minPort;
+				localSipPort = (int) ((maxPort - minPort) * Math.random()) + minPort;
 				continue;
 			}
 			successfullyBound = true;
+			localSipProfile.setLocalSipPort(localSipPort);
+			//TODO: needs to check for the public port again if the local one changed
 		}
 
 		sipProvider = sipStack.createSipProvider(listeningPoint);
@@ -152,10 +151,10 @@ public class SipMessageHandler {
 	 * @throws ObjectInUseException
 	 * @throws InvalidArgumentException
 	 */
-	public static SipMessageHandler createInstance(LocalSipProfile localSipProfile, DiscoveryInfo discoveryInfo) throws PeerUnavailableException, TransportNotSupportedException,
+	public static SipMessageHandler createInstance(LocalSipProfile localSipProfile, String localIPAddress, int localSipPort) throws PeerUnavailableException, TransportNotSupportedException,
 			ObjectInUseException, InvalidArgumentException {
 		if (sipMessageHandler == null)
-			sipMessageHandler = new SipMessageHandler(localSipProfile, discoveryInfo);
+			sipMessageHandler = new SipMessageHandler(localSipProfile, localIPAddress, localSipPort);
 
 		return sipMessageHandler;
 	}
@@ -200,7 +199,7 @@ public class SipMessageHandler {
 
 		// Create Via headers
 		List<ViaHeader> viaHeaders = new ArrayList<ViaHeader>();
-		ViaHeader viaHeader = headerFactory.createViaHeader(discoveryInfo.getPublicIP().getHostAddress(), discoveryInfo.getPublicPort(), listeningPoint.getTransport(), null);
+		ViaHeader viaHeader = headerFactory.createViaHeader(localIPAddress, localSipPort, listeningPoint.getTransport(), null);
 		viaHeader.setRPort();
 		viaHeaders.add(viaHeader);
 
@@ -208,7 +207,7 @@ public class SipMessageHandler {
 		CallIdHeader callIdHeader = sipProvider.getNewCallId();
 
 		// Create a new Cseq header
-		CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(callSequence++, Request.REGISTER);
+		CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(callSequence, Request.REGISTER);
 
 		// Create a new MaxForwards header
 		MaxForwardsHeader maxForwards = headerFactory.createMaxForwardsHeader(70);
@@ -226,8 +225,8 @@ public class SipMessageHandler {
 			request.addHeader(contactHeader);
 		} else {
 			// Create the contact name address
-			SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), discoveryInfo.getPublicIP().getHostAddress());
-			contactURI.setPort(discoveryInfo.getPublicPort());
+			SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), localIPAddress);
+			contactURI.setPort(localSipPort);
 			Address contactAddress = addressFactory.createAddress(contactURI);
 			contactAddress.setDisplayName(localSipProfile.getDisplayName());
 
@@ -244,7 +243,7 @@ public class SipMessageHandler {
 		// Create the client transaction and send the request
 		clientTransaction = sipProvider.getNewClientTransaction(request);
 		clientTransaction.sendRequest();
-		Log.d(TAG, "REGISTER sent");
+		System.out.println(TAG +": REGISTER sent");
 	}
 
 	/**
@@ -264,38 +263,58 @@ public class SipMessageHandler {
 		ContactHeader contactHeader = (ContactHeader) message.getHeader(ContactHeader.NAME);
 		String address = contactHeader.getAddress().getURI().toString().split("@")[1].split(";")[0];
 
-		List<SipAudioFormat> formatList = null;
-		int rtpPort = 0, rtcpPort = 0;
+		List<SipAudioFormat> audioFormats = new LinkedList<SipAudioFormat>();
+		List<SipVideoFormat> videoFormats = new LinkedList<SipVideoFormat>();
+		int audioRtpPort = 0, audioRtcpPort = 0, videoRtpPort = 0, videoRtcpPort = 0;
 
 		@SuppressWarnings("unchecked")
 		Vector<MediaDescription> v = sdpSession.getMediaDescriptions(false);
 		if (v != null) {
 			for (MediaDescription item : v) {
 				if (item.getMedia().getMediaType().contains("audio")) {
-					rtpPort = item.getMedia().getMediaPort();
+					audioRtpPort = item.getMedia().getMediaPort();
 
 					@SuppressWarnings("unchecked")
 					Vector<Attribute> formats = item.getAttributes(false);
-					formatList = new LinkedList<SipAudioFormat>();
 					if (formats != null) {
 						for (Attribute attribute : formats) {
 							if (attribute.getName() != null && attribute.getName().contains("rtpmap")) {
 								try {
-									formatList.add(SipAudioFormat.parseAudioFormat(attribute.getValue()));
+									audioFormats.add(SipAudioFormat.parseAudioFormat(attribute.getValue()));
 								} catch (Exception e) {
 									// not a valid number
 								}
 							} else if (attribute.getName().contains("rtcp")) {
 								try {
-									rtcpPort = Integer.parseInt(attribute.getValue());
+									audioRtcpPort = Integer.parseInt(attribute.getValue());
 								} catch (Exception e) {
 									// not a valid number
 								}
 							}
 						}
 					}
-				} else if (item.getMedia().getMediaType().contains("audio")) {
-					// TODO: implement support for video types
+				} else if (item.getMedia().getMediaType().contains("video")) {
+					videoRtpPort = item.getMedia().getMediaPort();
+
+					@SuppressWarnings("unchecked")
+					Vector<Attribute> formats = item.getAttributes(false);
+					if (formats != null) {
+						for (Attribute attribute : formats) {
+							if (attribute.getName() != null && attribute.getName().contains("rtpmap")) {
+								try {
+									videoFormats.add(SipVideoFormat.parseVideoFormat(attribute.getValue()));
+								} catch (Exception e) {
+									// not a valid number
+								}
+							} else if (attribute.getName().contains("rtcp")) {
+								try {
+									videoRtcpPort = Integer.parseInt(attribute.getValue());
+								} catch (Exception e) {
+									// not a valid number
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -305,15 +324,16 @@ public class SipMessageHandler {
 			int port = Integer.parseInt(address.split(":")[1]);
 			InetAddress inetAddress = InetAddress.getByName(sdpSession.getConnection().getAddress());
 
-			session = new SipSession(fromHeader.getAddress().getURI(), toHeader.getAddress().getURI(), inetAddress, port, rtpPort, rtcpPort);
+			session = new SipSession(fromHeader.getAddress().getURI(), toHeader.getAddress().getURI(), inetAddress, port, audioRtpPort, audioRtcpPort, videoRtpPort, videoRtcpPort);
 		} else {
 			InetAddress inetAddress = InetAddress.getByName(sdpSession.getConnection().getAddress());
 
-			session = new SipSession(fromHeader.getAddress().getURI(), toHeader.getAddress().getURI(), inetAddress, 5060, rtpPort, rtcpPort);
+			session = new SipSession(fromHeader.getAddress().getURI(), toHeader.getAddress().getURI(), inetAddress, 5060, audioRtpPort, audioRtcpPort, videoRtpPort, videoRtcpPort);
 		}
-		session.setAudioFormats(formatList);
+		session.setAudioFormats(audioFormats);
+		session.setVideoFormats(videoFormats);
 
-		Log.d(TAG, "SipSession created: " + session.toString());
+		System.out.println(TAG +": SipSession created: " + session.toString());
 		return session;
 	}
 
@@ -334,7 +354,7 @@ public class SipMessageHandler {
 		if (serverTransaction == null)
 			serverTransaction = sipProvider.getNewServerTransaction(invite);
 		serverTransaction.sendResponse(response);
-		Log.d(TAG, "RINGING sent");
+		System.out.println(TAG +": RINGING sent");
 	}
 
 	/**
@@ -344,9 +364,9 @@ public class SipMessageHandler {
 	 * @throws SipException
 	 */
 	public void sendAck() throws InvalidArgumentException, SipException {
-		Request request = currentDialog.createAck(callSequence);
+		Request request = currentDialog.createAck(callSequence++);
 		currentDialog.sendAck(request);
-		Log.d(TAG, "ACK sent");
+		System.out.println(TAG +": ACK sent");
 	}
 
 	/**
@@ -367,8 +387,8 @@ public class SipMessageHandler {
 
 		if (transaction == null) {
 			// Create the contact name address
-			SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), discoveryInfo.getPublicIP().getHostAddress());
-			contactURI.setPort(discoveryInfo.getPublicPort());
+			SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), localIPAddress);
+			contactURI.setPort(localSipPort);
 			Address contactAddress = addressFactory.createAddress(contactURI);
 			contactAddress.setDisplayName(localSipProfile.getDisplayName());
 
@@ -389,7 +409,7 @@ public class SipMessageHandler {
 		} else {
 			transaction.sendResponse(response);
 		}
-		Log.d(TAG, "OK sent");
+		System.out.println(TAG +": OK sent");
 	}
 
 	/**
@@ -416,7 +436,7 @@ public class SipMessageHandler {
 		// Create the client transaction and send the request
 		ClientTransaction clientTransaction = sipProvider.getNewClientTransaction(request);
 		currentDialog.sendRequest(clientTransaction);
-		Log.d(TAG, "BYE sent");
+		System.out.println(TAG +": BYE sent");
 	}
 
 	/**
@@ -433,7 +453,7 @@ public class SipMessageHandler {
 		// Create the client transaction and send the request
 		clientTransaction = sipProvider.getNewClientTransaction(request);
 		clientTransaction.sendRequest();
-		Log.d(TAG, "CANCEL sent");
+		System.out.println(TAG +": CANCEL sent");
 	}
 
 	/**
@@ -457,10 +477,14 @@ public class SipMessageHandler {
 		// create a new Request URI
 		SipURI requestURI = addressFactory.createSipURI(contact.getSipUserName(), contact.getSipDomain());
 
+		if(contact.isLocalContact())
+			requestURI.setPort(contact.getSipPort());
+		
 		// Create Via headers
 		List<ViaHeader> viaHeaders = new ArrayList<ViaHeader>();
-		ViaHeader viaHeader = headerFactory.createViaHeader(discoveryInfo.getPublicIP().getHostAddress(), discoveryInfo.getPublicPort(), listeningPoint.getTransport(), null);
-		viaHeader.setRPort();
+		ViaHeader viaHeader = headerFactory.createViaHeader(localIPAddress, localSipPort, listeningPoint.getTransport(), null);
+		if(!contact.isLocalContact())
+			viaHeader.setRPort();
 		viaHeaders.add(viaHeader);
 
 		// Create a new CallId header
@@ -468,7 +492,7 @@ public class SipMessageHandler {
 			currentCallID = sipProvider.getNewCallId();
 
 		// Create a new Cseq header
-		CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(callSequence++, Request.INVITE);
+		CSeqHeader cSeqHeader = headerFactory.createCSeqHeader(callSequence, Request.INVITE);
 
 		// Create a new MaxForwards header
 		MaxForwardsHeader maxForwards = headerFactory.createMaxForwardsHeader(70);
@@ -481,8 +505,8 @@ public class SipMessageHandler {
 		request.addFirst(expires);
 
 		// Create the contact name address
-		SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), discoveryInfo.getPublicIP().getHostAddress());
-		contactURI.setPort(discoveryInfo.getPublicPort());
+		SipURI contactURI = addressFactory.createSipURI(localSipProfile.getUserName(), localIPAddress);
+		contactURI.setPort(localSipPort);
 		Address contactAddress = addressFactory.createAddress(contactURI);
 		contactAddress.setDisplayName(localSipProfile.getDisplayName());
 
@@ -491,7 +515,7 @@ public class SipMessageHandler {
 		request.addHeader(contactHeader);
 
 		if (state.equals(SipRequestState.AUTHORIZATION)) {
-			request.addHeader(localSipProfile.getProxyAuthorizationHeader(headerFactory, contact));
+			request.addHeader(localSipProfile.getProxyAuthorizationHeader(headerFactory));
 		}
 
 		ContentTypeHeader contentTypeHeader = headerFactory.createContentTypeHeader("application", "sdp");
@@ -503,7 +527,7 @@ public class SipMessageHandler {
 		clientTransaction.sendRequest();
 
 		currentDialog = clientTransaction.getDialog();
-		Log.d(TAG, "INVITE sent");
+		System.out.println(TAG +": INVITE sent");
 	}
 
 	/**
@@ -523,7 +547,7 @@ public class SipMessageHandler {
 		if (serverTransaction == null)
 			serverTransaction = sipProvider.getNewServerTransaction(invite);
 		serverTransaction.sendResponse(response);
-		Log.d(TAG, "DECLINE sent");
+		System.out.println(TAG +": DECLINE sent");
 	}
 
 	/**
@@ -543,7 +567,27 @@ public class SipMessageHandler {
 		if (serverTransaction == null)
 			serverTransaction = sipProvider.getNewServerTransaction(invite);
 		serverTransaction.sendResponse(response);
-		Log.d(TAG, "BUSY HERE sent");
+		System.out.println(TAG +": BUSY HERE sent");
+	}
+
+	/**
+	 * Send a sip not found response.
+	 * 
+	 * @param invite
+	 *            the Request to reply to
+	 * @throws ParseException
+	 * @throws SipException
+	 * @throws InvalidArgumentException
+	 */
+	public void sendNotFound(Request invite) throws ParseException, SipException, InvalidArgumentException {
+		// Create a new response for the request
+		Response response = messageFactory.createResponse(Response.NOT_FOUND, invite);
+
+		// Send the created response
+		if (serverTransaction == null)
+			serverTransaction = sipProvider.getNewServerTransaction(invite);
+		serverTransaction.sendResponse(response);
+		System.out.println(TAG +": NOT FOUND sent");
 	}
 
 	/**
@@ -576,7 +620,7 @@ public class SipMessageHandler {
 		originField.setSessVersion(sessionVersion);
 		originField.setNetworkType(SDPKeywords.IN);
 		originField.setAddressType(SDPKeywords.IPV4);
-		originField.setAddress(discoveryInfo.getPublicIP().getHostAddress());
+		originField.setAddress(localIPAddress);
 
 		SessionNameField sessionNameField = new SessionNameField();
 		sessionNameField.setSessionName(sessionName);
@@ -584,40 +628,79 @@ public class SipMessageHandler {
 		ConnectionField connectionField = new ConnectionField();
 		connectionField.setNetworkType(SDPKeywords.IN);
 		connectionField.setAddressType(SDPKeywords.IPV4);
-		connectionField.setAddress(discoveryInfo.getPublicIP().getHostAddress());
+		connectionField.setAddress(localIPAddress);
 
 		Vector mediaDescriptions = new Vector();
-		MediaField mediaField = new MediaField();
-		mediaField.setMediaType("audio");
-		mediaField.setPort(localSipProfile.getLocalRtpPort());
-		mediaField.setProtocol(SdpConstants.RTP_AVP);
 
-		Vector<String> mediaFormats = new Vector<String>();
-		for (SipAudioFormat audioFormat : localSipProfile.getAudioFormats()) {
-			mediaFormats.add(audioFormat.getFormat() + "");
+		// Add audio formats
+		if(localSipProfile.getAudioFormats().size() > 0){
+			MediaField audioField = new MediaField();
+			audioField.setMediaType("audio");
+			audioField.setPort(localSipProfile.getLocalAudioRtpPort());
+			audioField.setProtocol(SdpConstants.RTP_AVP);
+
+			Vector<String> audioFormats = new Vector<String>();
+			for (SipAudioFormat audioFormat : localSipProfile.getAudioFormats()) {
+				audioFormats.add(audioFormat.getFormat() + "");
+			}
+			audioField.setMediaFormats(audioFormats);
+
+			MediaDescriptionImpl audioDescription = new MediaDescriptionImpl();
+
+			for (SipAudioFormat audioFormat : localSipProfile.getAudioFormats()) {
+				AttributeField attributeField = new AttributeField();
+				attributeField.setName(SdpConstants.RTPMAP);
+				attributeField.setValue(audioFormat.getSdpField());
+				audioDescription.addAttribute(attributeField);
+			}
+
+			AttributeField sendReceive = new AttributeField();
+			sendReceive.setValue("sendrecv");
+			audioDescription.addAttribute(sendReceive);
+
+			AttributeField rtcpAttribute = new AttributeField();
+			rtcpAttribute.setName("rtcp");
+			rtcpAttribute.setValue(localSipProfile.getLocalAudioRtcpPort() + "");
+			audioDescription.addAttribute(rtcpAttribute);
+
+			mediaDescriptions.add(audioField);
+			mediaDescriptions.add(audioDescription);
 		}
-		mediaField.setMediaFormats(mediaFormats);
 
-		MediaDescriptionImpl mediaDescription = new MediaDescriptionImpl();
+		// Add video formats
+		if(localSipProfile.getVideoFormats().size() > 0){
+			MediaField videoField = new MediaField();
+			videoField.setMediaType("video");
+			videoField.setPort(localSipProfile.getLocalVideoRtpPort());
+			videoField.setProtocol(SdpConstants.RTP_AVP);
 
-		for (SipAudioFormat audioFormat : localSipProfile.getAudioFormats()) {
-			AttributeField attributeField = new AttributeField();
-			attributeField.setName(SdpConstants.RTPMAP);
-			attributeField.setValue(audioFormat.getSdpField());
-			mediaDescription.addAttribute(attributeField);
+			Vector<String> videoFormats = new Vector<String>();
+			for (SipVideoFormat videoFormat : localSipProfile.getVideoFormats()) {
+				videoFormats.add(videoFormat.getFormat() + "");
+			}
+			videoField.setMediaFormats(videoFormats);
+
+			MediaDescriptionImpl videoDescription = new MediaDescriptionImpl();
+
+			for (SipVideoFormat videoFormat : localSipProfile.getVideoFormats()) {
+				AttributeField attributeField = new AttributeField();
+				attributeField.setName(SdpConstants.RTPMAP);
+				attributeField.setValue(videoFormat.getSdpField());
+				videoDescription.addAttribute(attributeField);
+			}
+
+			AttributeField sendReceive = new AttributeField();
+			sendReceive.setValue("sendrecv");
+			videoDescription.addAttribute(sendReceive);
+
+			AttributeField rtcpAttribute = new AttributeField();
+			rtcpAttribute.setName("rtcp");
+			rtcpAttribute.setValue(localSipProfile.getLocalVideoRtcpPort() + "");
+			videoDescription.addAttribute(rtcpAttribute);
+
+			mediaDescriptions.add(videoField);
+			mediaDescriptions.add(videoDescription);
 		}
-
-		AttributeField sendReceive = new AttributeField();
-		sendReceive.setValue("sendrecv");
-		mediaDescription.addAttribute(sendReceive);
-
-		AttributeField rtcpAttribute = new AttributeField();
-		rtcpAttribute.setName("rtcp");
-		rtcpAttribute.setValue(localSipProfile.getLocalRtcpPort() + "");
-		mediaDescription.addAttribute(rtcpAttribute);
-
-		mediaDescriptions.add(mediaField);
-		mediaDescriptions.add(mediaDescription);
 
 		sdp.setOrigin(originField);
 		sdp.setSessionName(sessionNameField);

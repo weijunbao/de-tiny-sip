@@ -10,24 +10,24 @@
 package de.tinysip.sip;
 
 /**
- * Contains the information about a supported audio format.
+ * Contains the information about a supported video format.
  * 
  * @author Sebastian
  * 
  */
-public class SipAudioFormat {
+public class SipVideoFormat {
 	private int format;
 	private String formatName;
 	private int sampleRate;
 
 	/**
-	 * Create a SipAudioFormat which is supported by the application. This is needed for the sip session. Specify the integer format code, the format name and the sample rate.
+	 * Create a SipVideoFormat which is supported by the application. This is needed for the sip session. Specify the integer format code, the format name and the sample rate.
 	 * 
-	 * @param format an integer value specifying the audio format. Use SDPConstants for values
-	 * @param formatName a string representation for the audio format
-	 * @param sampleRate the supported sample rate of the audio format, in Hz
+	 * @param format an integer value specifying the video format. Use SDPConstants for values
+	 * @param formatName a string representation for the video format
+	 * @param sampleRate the supported sample rate of the video format, in Hz
 	 */
-	public SipAudioFormat(int format, String formatName, int sampleRate) {
+	public SipVideoFormat(int format, String formatName, int sampleRate) {
 		this.format = format;
 		this.formatName = formatName;
 		this.sampleRate = sampleRate;
@@ -55,32 +55,32 @@ public class SipAudioFormat {
 	}
 
 	/**
-	 * @return concatenated format data used by the sdp rtpmap field. Example: "8 PCMA/8000"
+	 * @return concatenated format data used by the sdp rtpmap field. Example: "26 JPEG/90000"
 	 */
 	public String getSdpField() {
 		return format + " " + formatName + "/" + sampleRate;
 	}
-	
+
 	@Override
 	public boolean equals(Object o) {
-		SipAudioFormat other = (SipAudioFormat)o;
+		SipVideoFormat other = (SipVideoFormat)o;
 		return this.format == other.format && this.sampleRate == other.sampleRate;
 	}
-
+	
 	/**
-	 * Parse a SipAudioFormat from an audio format string. Example: "8 PCMA/8000" or "rtpmap:8 PCMA/8000"
+	 * Parse a SipVideoFormat from an video format string. Example: "26 JPEG/90000" or "rtpmap:26 JPEG/90000""
 	 * 
-	 * @param audioFormat the string to parse
-	 * @return the parsed SipAudioFormat
+	 * @param videoFormat the string to parse
+	 * @return the parsed SipVideoFormat
 	 */
-	public static SipAudioFormat parseAudioFormat(String audioFormat) {
+	public static SipVideoFormat parseVideoFormat(String videoFormat) {
 		try {
-			String trim = audioFormat.replace("rtpmap:", "");
+			String trim = videoFormat.replace("rtpmap:", "");
 			String format = trim.split(" ")[0];
 			String formatName = trim.split(" ")[1].split("/")[0];
 			String sampleRate = trim.split(" ")[1].split("/")[1];
 
-			return new SipAudioFormat(Integer.parseInt(format), formatName, Integer.parseInt(sampleRate));
+			return new SipVideoFormat(Integer.parseInt(format), formatName, Integer.parseInt(sampleRate));
 		} catch (Exception e) {
 			return null;
 		}

@@ -11,6 +11,7 @@ package de.tinysip.sip;
 
 import gov.nist.javax.sip.address.SipUri;
 
+import java.net.InetAddress;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,14 +39,39 @@ public class LocalSipProfile {
 	private String sipPassword;
 	private int sipPort;
 
-	private int localRtpPort;
-	private int localRtcpPort;
+	private int localSipPort;
+	private int localAudioRtpPort;
+	private int localAudioRtcpPort;
+	private int localVideoRtpPort;
+	private int localVideoRtcpPort;
 	private List<SipAudioFormat> audioFormats;
+	private List<SipVideoFormat> videoFormats;
 
 	private String nonce;
 	private String realm;
 
 	private String tag;
+
+	/**
+	 * Create a LocalSipProfile for the local user, specifying the user name and his IP address for local use only.
+	 * 
+	 * @param userName
+	 *            the SIP username of the local user
+	 * @param localAddress
+	 *            the local IP Address of the user
+	 */
+	public LocalSipProfile(String userName, InetAddress localAddress) {
+		this.userName = userName;
+		this.sipDomain = localAddress.getHostAddress();
+		this.sipPort = 5060;
+		this.localSipPort = 5060;
+		this.displayName = userName;
+		this.audioFormats = new ArrayList<SipAudioFormat>();
+		this.videoFormats = new ArrayList<SipVideoFormat>();
+
+		String rand = (Math.random() * 10000) + "";
+		this.tag = AuthorizationDigest.getHexString(rand.getBytes());
+	}
 
 	/**
 	 * Create a LocalSipProfile for the local user, specifying the user name, his sip domain and password.
@@ -62,8 +88,10 @@ public class LocalSipProfile {
 		this.sipDomain = sipDomain;
 		this.sipPassword = sipPassword;
 		this.sipPort = 5060;
+		this.localSipPort = 5060;
 		this.displayName = userName;
 		this.audioFormats = new ArrayList<SipAudioFormat>();
+		this.videoFormats = new ArrayList<SipVideoFormat>();
 
 		String rand = (Math.random() * 10000) + "";
 		this.tag = AuthorizationDigest.getHexString(rand.getBytes());
@@ -193,10 +221,9 @@ public class LocalSipProfile {
 	 * @return the ProxyAuthorizationHeader for this LocalSipProfile
 	 * @throws ParseException
 	 */
-	public ProxyAuthorizationHeader getProxyAuthorizationHeader(HeaderFactory headerFactory, SipContact contact) throws ParseException {
+	public ProxyAuthorizationHeader getProxyAuthorizationHeader(HeaderFactory headerFactory) throws ParseException {
 		SipUri uri = new SipUri();
 		uri.setHost(this.sipDomain);
-		uri.setUser(contact.getSipUserName());
 
 		String responseDigest = AuthorizationDigest.getDigest(this.userName, this.realm, this.sipPassword, "INVITE", uri.toString(), this.nonce);
 
@@ -212,7 +239,7 @@ public class LocalSipProfile {
 	}
 
 	/**
-	 * Set the supported audio formats as a list of integers
+	 * Set the supported audio formats as a List of SipAudioFormat
 	 * 
 	 * @param audioFormats
 	 *            the supported audio formats as a List of SipAudioFormat
@@ -226,6 +253,23 @@ public class LocalSipProfile {
 	 */
 	public List<SipAudioFormat> getAudioFormats() {
 		return audioFormats;
+	}
+
+	/**
+	 * Set the supported video formats as a List of SipVideoFormat
+	 * 
+	 * @param videoFormats
+	 *            the supported audio formats as a List of SipVideoFormat
+	 */
+	public void setVideoFormats(List<SipVideoFormat> videoFormats) {
+		this.videoFormats = videoFormats;
+	}
+
+	/**
+	 * @return the supported video formats as a List of SipVideoFormat
+	 */
+	public List<SipVideoFormat> getVideoFormats() {
+		return videoFormats;
 	}
 
 	/**
@@ -284,35 +328,117 @@ public class LocalSipProfile {
 	}
 
 	/**
-	 * Set the local rtp port.
+	 * Set the local rtp port for audio.
 	 * 
-	 * @param localRtpPort
+	 * @param localAudioRtpPort
 	 */
-	public void setLocalRtpPort(int localRtpPort) {
-		this.localRtpPort = localRtpPort;
+	public void setLocalAudioRtpPort(int localAudioRtpPort) {
+		this.localAudioRtpPort = localAudioRtpPort;
 	}
 
 	/**
-	 * @return the local rtp port
+	 * @return the local rtp port for audio
 	 */
-	public int getLocalRtpPort() {
-		return localRtpPort;
+	public int getLocalAudioRtpPort() {
+		return localAudioRtpPort;
 	}
 
 	/**
-	 * Set the local rtcp port.
+	 * Set the local rtcp port for audio.
 	 * 
-	 * @param localRtcpPort
+	 * @param localAudioRtcpPort
 	 */
-	public void setLocalRtcpPort(int localRtcpPort) {
-		this.localRtcpPort = localRtcpPort;
+	public void setLocalAudioRtcpPort(int localAudioRtcpPort) {
+		this.localAudioRtcpPort = localAudioRtcpPort;
 	}
 
 	/**
-	 * @return the local rtcp port
+	 * @return the local rtcp port for audio
 	 */
-	public int getLocalRtcpPort() {
-		return localRtcpPort;
+	public int getLocalAudioRtcpPort() {
+		return localAudioRtcpPort;
+	}
+
+	/**
+	 * Set the local rtp port for video.
+	 * 
+	 * @param localVideoRtpPort
+	 */
+	public void setLocalVideoRtpPort(int localVideoRtpPort) {
+		this.localVideoRtpPort = localVideoRtpPort;
+	}
+
+	/**
+	 * @return the local rtp port for video
+	 */
+	public int getLocalVideoRtpPort() {
+		return localVideoRtpPort;
+	}
+
+	/**
+	 * Set the local rtcp port for video.
+	 * 
+	 * @param localVideoRtcpPort
+	 */
+	public void setLocalVideoRtcpPort(int localVideoRtcpPort) {
+		this.localVideoRtcpPort = localVideoRtcpPort;
+	}
+
+	/**
+	 * @return the local rtcp port for video
+	 */
+	public int getLocalVideoRtcpPort() {
+		return localVideoRtcpPort;
+	}
+
+	/**
+	 * @return the local sip port
+	 */
+	public int getLocalSipPort() {
+		return localSipPort;
+	}
+
+	/**
+	 * Set the local sip port
+	 * 
+	 * @param localSipPort
+	 */
+	public void setLocalSipPort(int localSipPort) {
+		this.localSipPort = localSipPort;
+	}
+	
+	/**
+	 * @return the SipUri of the local sip profile
+	 */
+	public SipUri getSipUri(){
+		SipUri uri = new SipUri();
+		try {
+			uri.setHost(this.sipDomain);
+		} catch (ParseException e) {
+			e.printStackTrace();
+		}
+		uri.setUser(this.userName);
+		if(isLocalProfile())
+			uri.setPort(this.localSipPort);
+		return uri;
+	}
+
+	/**
+	 * @return whether this profile is a local profile only
+	 */
+	public boolean isLocalProfile() {
+		if (this.sipDomain != null && this.sipPassword != null)
+			return false;
+		else
+			return true;
+	}
+
+	@Override
+	public String toString() {
+		if (isLocalProfile())
+			return userName + "@" + sipDomain + ":" + localSipPort;
+		else
+			return userName + "@" + sipDomain;
 	}
 
 }

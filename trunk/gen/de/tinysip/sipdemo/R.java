@@ -28,6 +28,7 @@ public final class R {
         public static final int SIPUnregistering=0x7f040003;
         public static final int STUNDiscovery=0x7f040008;
         public static final int STUNError=0x7f040001;
+        public static final int STUNNotSupported=0x7f040009;
         public static final int app_name=0x7f040000;
     }
 }
